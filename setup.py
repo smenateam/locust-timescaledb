@@ -1,31 +1,31 @@
 from setuptools import setup, find_packages
 
-__version__ = '0.2.3'
+__version__ = '0.0.1'
 
 with open('README.md', 'r') as f:
     long_description = f.read()
 
 setup(
-    name='locust_influx',
+    name='locust-timescaledb',
     version=__version__,
-    url='https://github.com/lucrib/locust_influx',
+    url='https://github.com/smenateam/locust-timescaledb',
     license='Apache-2.0',
-    author='Lucas Ribeiro',
-    author_email='lucasribeiro1990@gmail.com',
-    description='Report locust metrics to influxdb.',
+    author='SMENA',
+    author_email='smenateam@smena.space',
+    description='Report locust metrics to timescaledb.',
     long_description=long_description,
     long_description_content_type='text/markdown',
     packages=find_packages(),
     package_data={'': ['LICENSE', 'README.md']},
-    package_dir={'locust_influx': 'locust_influx'},
+    package_dir={'locust-timescaledb': 'locust-timescaledb'},
     include_package_data=True,
     python_requires='>=3.6',
     install_requires=[
-        'locustio>=0.12.2',
-        'influxdb>=5.2.2',
+        'locustio>=0.13.5',
+        'psycopg2>=2.8.4',
     ],
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 3 - Alpha",
         "Environment :: Plugins",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: Apache Software License",
@@ -35,7 +35,6 @@ setup(
         "Programming Language :: Python :: 3.7",
     ],
     project_urls={
-        'Documentation': 'https://locust_influx.github.io',
-        'Source': 'https://github.com/lucrib/locust_influx',
+        'Source': 'https://github.com/smenateam/locust-timescaledb',
     },
 )

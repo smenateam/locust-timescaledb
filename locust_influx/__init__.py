@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Callable
 
 import gevent
-from influxdb import InfluxDBClient
+import psycopg2
 from locust import events
 
 __all__ = ['expose_metrics']
@@ -104,7 +104,7 @@ def __listen_for_locust_errors(node_id: str) -> Callable:
     return event_handler
 
 
-def __flush_points(influxdb_client: InfluxDBClient) -> None:
+def __flush_points(cursor: psycopg2.extensions.cursor) -> None:
     """
     Write the cached data points to influxdb
 
@@ -122,39 +122,84 @@ def __flush_points(influxdb_client: InfluxDBClient) -> None:
         cache.insert(0, to_be_flushed)
 
 
-def __flush_cached_points_worker(influxdb_client, interval) -> None:
+def __flush_cached_points_worker(cursor, interval) -> None:
     """
     Background job that puts the points into the cache to be flushed according tot he interval defined.
 
-    :param influxdb_client:
+    :param cursor:
     :param interval:
     :return: None
     """
     global stop_flag
     log.info('Flush worker started.')
     while not stop_flag:
-        __flush_points(influxdb_client)
+        __flush_points(cursor)
         gevent.sleep(interval / 1000)
 
 
-def expose_metrics(influx_host: str = 'localhost',
-                   influx_port: int = 8086,
+def __prepare_tables(cursor: psycopg2.extensions.cursor) -> None:
+    cursor.exec("""
+                    CREATE TABLE IF NOT EXISTS locust_events (
+                    time        TIMESTAMPTZ       NOT NULL,
+                    node_id     text              NOT NULL,
+                    event       text              NOT NULL
+                    );
+                """)
+    cursor.exec("""
+                    SELECT
+                    create_hypertable(locust_events, 'time', if_not_exists => TRUE);
+                """)
+    cursor.exec("""
+                        CREATE TABLE IF NOT EXISTS locust_requests (
+                        time            TIMESTAMPTZ       NOT NULL,
+                        node_id         text              NOT NULL,
+                        request_type    text              NOT NULL,
+                        name            text              NOT NULL,
+                        success         BOOLEAN           NOT NULL,
+                        exception       text              NOT NULL,
+                        response_time   real              NOT NULL,
+                        response_length integer           NOT NULL
+                        );
+                    """)
+    cursor.exec("""
+                    SELECT
+                    create_hypertable(locust_requests, 'time', if_not_exists => TRUE);
+                """)
+    cursor.exec("""
+                        CREATE TABLE IF NOT EXISTS locust_errors (
+                        time            TIMESTAMPTZ       NOT NULL,
+                        node_id         text              NOT NULL,
+                        exception       text              NOT NULL,
+                        traceback       text              NOT NULL
+                        );
+                    """)
+    cursor.exec("""
+                    SELECT
+                    create_hypertable(locust_errors, 'time', if_not_exists => TRUE);
+                """)
+
+
+def expose_metrics(timescale_host: str = 'localhost',
+                   timescale_port: int = 8086,
                    user: str = 'root',
                    pwd: str = 'root',
                    database: str = 'locust',
                    interval_ms: int = 1000) -> None:
     """
-    Attach event handlers to locust EventHooks in order to persist information to influxdb.
+    Attach event handlers to locust EventHooks in order to persist information to TimescaleDB.
 
-    :param influx_host: InfluxDB hostname or IP.
-    :param influx_port: InfluxDB port.
-    :param user: InfluxDB username.
-    :param pwd: InfluxDB password.
-    :param database: InfluxDB database name. Will be created if not exist.
-    :param interval_ms: Interval to save the data points to influxdb.
+    :param timescale_host: TimescaleDB hostname or IP.
+    :param timescale_port: TimescaleDB port.
+    :param user: TimescaleDB username.
+    :param pwd: TimescaleDB password.
+    :param database: TimescaleDB database name.
+    :param interval_ms: Interval to save the data points to TimescaleDB.
     """
-    influxdb_client = InfluxDBClient(influx_host, influx_port, user, pwd, database)
-    influxdb_client.create_database(database)
+    timescale_connection = psycopg2.connect(dbname=database, user=user,
+                                            password=pwd, host=timescale_host, port=timescale_port)
+    cursor = timescale_connection.cursor()
+    __prepare_tables(cursor)
+
     node_id = 'local'
     if '--master' in sys.argv:
         node_id = 'master'
@@ -162,7 +207,7 @@ def expose_metrics(influx_host: str = 'localhost',
         # TODO: Get real ID of slaves form locust somehow
         node_id = 'slave'
     # Start a greenlet that will save the data to influx according to the interval informed
-    flush_worker = gevent.spawn(__flush_cached_points_worker, influxdb_client, interval_ms)
+    flush_worker = gevent.spawn(__flush_cached_points_worker, cursor, interval_ms)
     # Request events
     events.request_success += __listen_for_requests_events(node_id, success=True)
     events.request_failure += __listen_for_requests_events(node_id, success=False)
